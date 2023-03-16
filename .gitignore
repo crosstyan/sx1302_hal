@@ -1,6 +1,7 @@
 */*.a
 */obj/
 *.swp
+*/build/
 bin/
 libloragw/inc/config.h
 libloragw/test_loragw_*

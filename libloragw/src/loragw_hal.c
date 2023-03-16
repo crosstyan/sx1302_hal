@@ -55,7 +55,6 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
-
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #if DEBUG_HAL == 1
     #define DEBUG_MSG(str)                fprintf(stdout, str)
@@ -122,8 +121,8 @@ the _start and _send functions assume they are valid.
 */
 static lgw_context_t lgw_context = {
     .is_started = false,
-    .board_cfg.com_type = LGW_COM_SPI,
-    .board_cfg.com_path = "/dev/spidev0.0",
+    .board_cfg.com_type = LGW_COM_USB,
+    .board_cfg.com_path = "/dev/ttyACM0",
     .board_cfg.lorawan_public = true,
     .board_cfg.clksrc = 0,
     .board_cfg.full_duplex = false,
@@ -188,7 +187,7 @@ static lgw_context_t lgw_context = {
         .spi_path = "/dev/spidev0.1",
         .rssi_offset = 0,
         .lbt_conf = {
-            .rssi_target = 0,
+            .rssi_target = 0, 
             .nb_channel = 0,
             .channels = {{ 0 }}
         }
@@ -792,8 +791,10 @@ int lgw_sx1261_setconf(struct lgw_conf_sx1261_s * conf) {
 
     /* Set the SX1261 global conf */
     CONTEXT_SX1261.enable = conf->enable;
-    strncpy(CONTEXT_SX1261.spi_path, conf->spi_path, sizeof CONTEXT_SX1261.spi_path);
-    CONTEXT_SX1261.spi_path[sizeof CONTEXT_SX1261.spi_path - 1] = '\0'; /* ensure string termination */
+    if (CONTEXT_COM_TYPE == LGW_COM_SPI) {
+        strncpy(CONTEXT_SX1261.spi_path, conf->spi_path, sizeof CONTEXT_SX1261.spi_path);
+        CONTEXT_SX1261.spi_path[sizeof CONTEXT_SX1261.spi_path - 1] = '\0'; /* ensure string termination */
+    }
     CONTEXT_SX1261.rssi_offset = conf->rssi_offset;
 
     /* Set the LBT conf */
@@ -1093,6 +1094,7 @@ int lgw_start(void) {
     dbg_init_random();
 
     if (CONTEXT_COM_TYPE == LGW_COM_SPI) {
+#if 0
         /* Find the temperature sensor on the known supported ports */
         for (i = 0; i < (int)(sizeof I2C_PORT_TEMP_SENSOR); i++) {
             ts_addr = I2C_PORT_TEMP_SENSOR[i];
@@ -1116,7 +1118,7 @@ int lgw_start(void) {
             printf("ERROR: no temperature sensor found.\n");
             return LGW_HAL_ERROR;
         }
-
+#endif
         /* Configure ADC AD338R for full duplex (CN490 reference design) */
         if (CONTEXT_BOARD.full_duplex == true) {
             err = i2c_linuxdev_open(I2C_DEVICE, I2C_PORT_DAC_AD5338R, &ad_fd);

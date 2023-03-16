@@ -57,6 +57,21 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 static int exit_sig = 0; /* 1 -> application terminates cleanly (shut down hardware, close open files, etc) */
 static int quit_sig = 0; /* 1 -> application terminates without shutting down the hardware */
 
+// add by taylor
+struct lgw_conf_sx1261_s sx1261_cfg = {
+    .enable = false,
+    .spi_path = "/dev/spidev0.1",
+    .rssi_offset = -19,
+    .lbt_conf = {
+        .enable = false,
+        .rssi_target = -80,
+        .nb_channel = 1,
+        .channels = {
+            {0}
+        }                         
+    }
+};
+
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS ---------------------------------------------------- */
 
@@ -98,6 +113,11 @@ void usage(void) {
     printf(" --loop        Number of loops for HAL start/stop (HAL unitary test)\n");
     printf( "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" );
     printf(" --fdd         Enable Full-Duplex mode (CN490 reference design)\n");
+    printf( "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" );
+    printf(" --lbt <str> Enable LBT\n");
+    printf(" --lbt-rssi-offset <int> [-65, 65], default is -19\n");
+    printf(" --lbt-spi-path <str> Only for SPI Module, default path is: /dev/spidev0.1\n");
+    printf(" --lbt-rssi-target <int> [-180, 0], default is -80\n");
 }
 
 /* handle signals */
@@ -175,6 +195,10 @@ int main(int argc, char **argv)
         {"loop", required_argument, 0, 0},
         {"nhdr", no_argument, 0, 0},
         {"fdd",  no_argument, 0, 0},
+        {"lbt", no_argument, 0, 0},
+        {"lbt-spi-path", required_argument, 0, 0},
+        {"lbt-rssi-offset", required_argument, 0, 0},
+        {"lbt-rssi-target", required_argument, 0, 0},
         {0, 0, 0, 0}
     };
 
@@ -405,6 +429,37 @@ int main(int argc, char **argv)
                     no_header = true;
                 } else if (strcmp(long_options[option_index].name, "fdd") == 0) {
                     full_duplex = true;
+                } else if (strcmp(long_options[option_index].name, "lbt") == 0) { // add by taylor
+                    sx1261_cfg.enable = true;
+                    sx1261_cfg.lbt_conf.enable = true;
+                } else if (strcmp(long_options[option_index].name, "lbt-spi-path") == 0) { // add by taylor
+                    i = sscanf(optarg, "%s", arg_s);
+                    if (i != 1) {
+                        printf("ERROR: invalid sx1261 spi path \n");
+                        return EXIT_FAILURE;
+                    } else {
+                        memset(sx1261_cfg.spi_path, 0, 64);
+                        sprintf(sx1261_cfg.spi_path, "%s", arg_s);
+                    }
+                    break;
+                } else if (strcmp(long_options[option_index].name, "lbt-rssi-offset") == 0) { // add by taylor
+                    i = sscanf(optarg, "%d", &arg_i);
+                    if ((arg_i < -65) || (arg_i > 65)) {
+                        printf("ERROR: invalid lbt-rssi-offset\n");
+                        return EXIT_FAILURE;
+                    } else {
+                        sx1261_cfg.rssi_offset = (int32_t)arg_i;
+                    }
+                    break;
+                }  else if (strcmp(long_options[option_index].name, "lbt-rssi-target") == 0) { // add by taylor
+                    i = sscanf(optarg, "%d", &arg_i);
+                    if ((arg_i < -180) || (arg_i > 0)) {
+                        printf("ERROR: invalid lbt-rssi-target\n");
+                        return EXIT_FAILURE;
+                    } else {
+                        sx1261_cfg.lbt_conf.rssi_target = (int32_t)arg_i;
+                    }
+                    break;
                 } else {
                     printf("ERROR: argument parsing options. Use -h to print help\n");
                     return EXIT_FAILURE;
@@ -425,6 +480,9 @@ int main(int argc, char **argv)
         printf("Sending %i FSK packets on %u Hz (FDev %u kHz, Bitrate %.2f, %i bytes payload, %i symbols preamble) at %i dBm\n", nb_pkt, ft, fdev_khz, br_kbps, size, preamble, rf_power);
     } else {
         printf("Sending %i LoRa packets on %u Hz (BW %i kHz, SF %i, CR %i, %i bytes payload, %i symbols preamble, %s header, %s polarity) at %i dBm\n", nb_pkt, ft, bw_khz, sf, 1, size, preamble, (no_header == false) ? "explicit" : "implicit", (invert_pol == false) ? "non-inverted" : "inverted", rf_power);
+        if (sx1261_cfg.enable == true && sx1261_cfg.lbt_conf.enable == true) { // add by taylor
+            printf("LBT: enabled, lbt rssi offset:%d, lbt rssi target:%d\n.", sx1261_cfg.rssi_offset, sx1261_cfg.lbt_conf.rssi_target);
+        }
     }
 
     /* Configure signal handling */
@@ -476,6 +534,34 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
     }
+
+    /* add by taylor start */
+    if (sx1261_cfg.enable == true && sx1261_cfg.lbt_conf.enable == true) {
+        switch (bw_khz) {
+            case 125:
+                sx1261_cfg.lbt_conf.channels[0].bandwidth = BW_125KHZ;
+                break;
+            case 250:
+                sx1261_cfg.lbt_conf.channels[0].bandwidth = BW_250KHZ;
+                break;
+            case 500:
+                sx1261_cfg.lbt_conf.channels[0].bandwidth = BW_500KHZ;
+                break;
+            default:
+                sx1261_cfg.lbt_conf.channels[0].bandwidth = (uint8_t)RAND_RANGE(BW_125KHZ, BW_500KHZ);
+                
+                break;
+        }
+        sx1261_cfg.lbt_conf.channels[0].freq_hz = ft;
+        sx1261_cfg.lbt_conf.channels[0].scan_time_us = 5000;
+        sx1261_cfg.lbt_conf.channels[0].transmit_time_ms = 4000;
+
+        int32_t ret = lgw_sx1261_setconf(&sx1261_cfg);
+        if (ret != LGW_HAL_SUCCESS) {
+            printf("ERROR: lgw_sx1261_setconf error\n");
+            exit(EXIT_FAILURE);
+        }
+    } /* add by taylor send */
 
     for (cnt_loop = 0; cnt_loop < nb_loop; cnt_loop++) {
         if (com_type == LGW_COM_SPI) {
@@ -566,6 +652,7 @@ int main(int argc, char **argv)
                     break;
                 default:
                     pkt.bandwidth = (uint8_t)RAND_RANGE(BW_125KHZ, BW_500KHZ);
+                   
                     break;
             }
 
@@ -573,6 +660,7 @@ int main(int argc, char **argv)
 
             pkt.payload[6] = (uint8_t)(i >> 0); /* FCnt */
             pkt.payload[7] = (uint8_t)(i >> 8); /* FCnt */
+
             x = lgw_send(&pkt);
             if (x != 0) {
                 printf("ERROR: failed to send packet\n");
